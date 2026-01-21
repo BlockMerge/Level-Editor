@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlockMerge - Level Editor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🎮 BlockMerge Level Editor</h1>
+                <p class="subtitle">Design worlds and levels for your game</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel - World & Level Management -->
+            <aside class="settings-panel">
+                <div class="panel-section">
+                    <h2>🌍 World Management</h2>
+                    
+                    <div class="form-group">
+                        <label for="worldSelect">Current World</label>
+                        <select id="worldSelect" onchange="switchWorld()">
+                            <option value="0">World 1</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="worldName">World Name</label>
+                        <input type="text" id="worldName" placeholder="e.g., Forest World" onchange="updateWorldName()">
+                    </div>
+
+                    <div class="button-row">
+                        <button class="btn btn-secondary" onclick="addWorld()">➕ Add World</button>
+                        <button class="btn btn-danger" onclick="deleteWorld()">🗑️ Delete</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>📋 Level Selection</h2>
+                    <div class="level-grid" id="levelGrid">
+                        <!-- Levels 1-9 (normal) and 10 (boss) will be generated here -->
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>⚙️ Grid Settings</h2>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="gridWidth">Width</label>
+                            <input type="number" id="gridWidth" min="3" max="20" value="6" onchange="updateGridSize()">
+                        </div>
+                        <div class="form-group">
+                            <label for="gridHeight">Height</label>
+                            <input type="number" id="gridHeight" min="3" max="20" value="8" onchange="updateGridSize()">
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="updateGridSize()">🔄 Update Grid</button>
+                </div>
+            </aside>
+
+            <!-- Center Panel - Grid Editor -->
+            <main class="grid-panel">
+                <div class="grid-header">
+                    <h2>🎨 Level Grid</h2>
+                    <div class="grid-info">
+                        <span id="currentLevelInfo">World 1 - Level 1</span>
+                        <span id="gridSizeInfo">Grid: 6x8</span>
+                    </div>
+                </div>
+                <div class="grid-container" id="gridContainer">
+                    <!-- Grid will be generated here -->
+                </div>
+                <div class="grid-footer">
+                    <button class="btn btn-warning" onclick="clearGrid()">🗑️ Clear Grid</button>
+                    <p class="hint">💡 Tip: Select a block type from the palette, then click cells to place blocks</p>
+                </div>
+            </main>
+
+            <!-- Right Panel - Block Palette & Export -->
+            <aside class="preview-panel">
+                <div class="panel-section">
+                    <h2>🎨 Block Palette</h2>
+                    <div class="block-palette" id="blockPalette">
+                        <div class="palette-item active" data-type="normal" onclick="selectBlockType('normal')">
+                            <div class="block-preview block-normal"></div>
+                            <span>Normal</span>
+                        </div>
+                        <div class="palette-item" data-type="explosive" onclick="selectBlockType('explosive')">
+                            <div class="block-preview block-explosive"></div>
+                            <span>Explosive</span>
+                        </div>
+                        <div class="palette-item" data-type="doubleDamage" onclick="selectBlockType('doubleDamage')">
+                            <div class="block-preview block-doubleDamage"></div>
+                            <span>Double Damage</span>
+                        </div>
+                        <div class="palette-item" data-type="reinforced" onclick="selectBlockType('reinforced')">
+                            <div class="block-preview block-reinforced"></div>
+                            <span>Reinforced</span>
+                        </div>
+                        <div class="palette-item" data-type="empty" onclick="selectBlockType('empty')">
+                            <div class="block-preview block-empty"></div>
+                            <span>Eraser</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>👁️ JSON Preview</h2>
+                    <div class="json-preview" id="jsonPreview">
+                        <pre id="jsonContent">{}</pre>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="updatePreview()">🔄 Refresh Preview</button>
+                </div>
+
+                <div class="panel-section actions">
+                    <button class="btn btn-success" onclick="exportJSON()">💾 Export JSON</button>
+                    <button class="btn btn-info" onclick="importJSON()">📂 Import JSON</button>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="autoSave" checked onchange="toggleAutoSave()">
+                            Auto-save to browser
+                        </label>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Hidden file input for import -->
+    <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="handleFileImport(event)">
+
+    <script src="script.js"></script>
+</body>
+</html>
