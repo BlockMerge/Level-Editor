@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BlockMerge - Level Editor</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="container">
         <!-- Header -->
@@ -22,7 +24,7 @@
             <aside class="settings-panel">
                 <div class="panel-section">
                     <h2>🌍 World Management</h2>
-                    
+
                     <div class="form-group">
                         <label for="worldSelect">Current World</label>
                         <select id="worldSelect" onchange="switchWorld()">
@@ -50,7 +52,7 @@
 
                 <div class="panel-section">
                     <h2>⚙️ Grid Settings</h2>
-                    
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="gridWidth">Width</label>
@@ -121,6 +123,14 @@
                 </div>
 
                 <div class="panel-section actions">
+                    <div class="form-group">
+                        <label for="exportScope">Export Scope</label>
+                        <select id="exportScope">
+                            <option value="level">Current Level</option>
+                            <option value="world">Current World (All Levels)</option>
+                            <option value="all">All Worlds</option>
+                        </select>
+                    </div>
                     <button class="btn btn-success" onclick="exportJSON()">💾 Export JSON</button>
                     <button class="btn btn-info" onclick="importJSON()">📂 Import JSON</button>
                     <div class="form-group">
@@ -139,4 +149,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>

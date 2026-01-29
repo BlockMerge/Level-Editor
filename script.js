@@ -315,23 +315,61 @@ function selectBlockType(type) {
 // ===== JSON Preview & Export =====
 function updatePreview() {
     const preview = document.getElementById('jsonContent');
-    preview.textContent = JSON.stringify(gameData, null, 2);
+    const currentWorld = gameData.worlds[currentWorldIndex];
+    const currentLevel = currentWorld.levels[currentLevelIndex];
+    preview.textContent = JSON.stringify(currentLevel, null, 2);
 }
 
 function exportJSON() {
-    const json = JSON.stringify(gameData, null, 2);
+    const exportScope = document.getElementById('exportScope').value;
+    const currentWorld = gameData.worlds[currentWorldIndex];
+    const currentLevel = currentWorld.levels[currentLevelIndex];
+
+    let dataToExport;
+    let filename;
+    let successMessage;
+
+    switch (exportScope) {
+        case 'level':
+            // Export only the current level
+            dataToExport = currentLevel;
+            filename = `level_w${currentWorld.worldId}_l${currentLevel.levelId}.json`;
+            successMessage = `✅ Level ${currentLevel.levelId} exported successfully!`;
+            break;
+
+        case 'world':
+            // Export the entire current world (all levels)
+            dataToExport = currentWorld;
+            filename = `world_${currentWorld.worldId}_${currentWorld.worldName.replace(/\s+/g, '_')}.json`;
+            successMessage = `✅ World "${currentWorld.worldName}" exported successfully!`;
+            break;
+
+        case 'all':
+            // Export all worlds
+            dataToExport = gameData;
+            filename = `blockmerge_all_worlds.json`;
+            successMessage = `✅ All worlds exported successfully!`;
+            break;
+
+        default:
+            dataToExport = currentLevel;
+            filename = `level_w${currentWorld.worldId}_l${currentLevel.levelId}.json`;
+            successMessage = `✅ Level ${currentLevel.levelId} exported successfully!`;
+    }
+
+    const json = JSON.stringify(dataToExport, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'blockmerge_levels.json';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    showNotification('✅ JSON exported successfully!', 'success');
+    showNotification(successMessage, 'success');
 }
 
 function importJSON() {
