@@ -66,6 +66,16 @@
 
                     <button class="btn btn-primary" onclick="updateGridSize()">🔄 Update Grid</button>
                 </div>
+
+                <div class="panel-section">
+                    <h2>🎯 Missions</h2>
+
+                    <div id="missionList" class="mission-list">
+                        <!-- Missions will be rendered here -->
+                    </div>
+
+                    <button class="btn btn-secondary" onclick="addMission()">➕ Add Mission</button>
+                </div>
             </aside>
 
             <!-- Center Panel - Grid Editor -->
@@ -89,7 +99,14 @@
             <!-- Right Panel - Block Palette & Export -->
             <aside class="preview-panel">
                 <div class="panel-section">
-                    <h2>🎨 Block Palette</h2>
+                    <h2>🔷 Block Shape</h2>
+                    <div class="shape-selector" id="shapeSelector">
+                        <!-- Shapes rendered by JS -->
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>🎨 Block Type</h2>
                     <div class="block-palette" id="blockPalette">
                         <div class="palette-item active" data-type="normal" onclick="selectBlockType('normal')">
                             <div class="block-preview block-normal"></div>

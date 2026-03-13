@@ -12,11 +12,36 @@ let gameData = {
 let currentWorldIndex = 0;
 let currentLevelIndex = 0;
 let selectedBlockType = "normal";
+let selectedShape = "single";
 let autoSaveEnabled = true;
 
 // ===== Constants =====
 const LEVELS_PER_WORLD = 10; // 9 normal + 1 boss
 const BLOCK_TYPES = ["normal", "explosive", "doubleDamage", "reinforced"];
+
+// Shape definitions: array of [rowOffset, colOffset] relative to anchor (top-left)
+const SHAPES = {
+    single: { name: "■", cells: [[0,0]], cols: 1, rows: 1 },
+    I2H:   { name: "▬ ×2", cells: [[0,0],[0,1]], cols: 2, rows: 1 },
+    I3H:   { name: "▬ ×3", cells: [[0,0],[0,1],[0,2]], cols: 3, rows: 1 },
+    I4H:   { name: "▬ ×4", cells: [[0,0],[0,1],[0,2],[0,3]], cols: 4, rows: 1 },
+    I2V:   { name: "▮ ×2", cells: [[0,0],[1,0]], cols: 1, rows: 2 },
+    I3V:   { name: "▮ ×3", cells: [[0,0],[1,0],[2,0]], cols: 1, rows: 3 },
+    I4V:   { name: "▮ ×4", cells: [[0,0],[1,0],[2,0],[3,0]], cols: 1, rows: 4 },
+    L:     { name: "L",   cells: [[0,0],[1,0],[2,0],[2,1]], cols: 2, rows: 3 },
+    J:     { name: "J",   cells: [[0,1],[1,1],[2,0],[2,1]], cols: 2, rows: 3 },
+    T:     { name: "T",   cells: [[0,0],[0,1],[0,2],[1,1]], cols: 3, rows: 2 },
+    S:     { name: "S",   cells: [[0,1],[0,2],[1,0],[1,1]], cols: 3, rows: 2 },
+    Z:     { name: "Z",   cells: [[0,0],[0,1],[1,1],[1,2]], cols: 3, rows: 2 },
+    O:     { name: "□",   cells: [[0,0],[0,1],[1,0],[1,1]], cols: 2, rows: 2 },
+    // Custom shape — updated live by the builder
+    __custom__: { name: "Custom", cells: [[0,0]], cols: 1, rows: 1 },
+};
+
+// ===== Custom Shape Builder State =====
+let customBuilderRows = 3;
+let customBuilderCols = 3;
+let customBuilderCells = new Set(); // set of "row,col" strings
 
 // ===== Initialize =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,7 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLevelGrid();
     renderWorldSelector();
     updateGridSize();
+    renderMissionList();
     updatePreview();
+    renderShapeSelector();
 });
 
 // ===== Initialization Functions =====
@@ -40,7 +67,8 @@ function initializeWorld() {
                 isBossLevel: i === 9, // Level 10 is boss
                 gridWidth: 6,
                 gridHeight: 8,
-                blocks: []
+                blocks: [],
+                missionItems: []
             });
         }
     }
@@ -65,7 +93,8 @@ function addWorld() {
             isBossLevel: i === 9,
             gridWidth: 6,
             gridHeight: 8,
-            blocks: []
+            blocks: [],
+            missionItems: []
         });
     }
 
@@ -177,6 +206,7 @@ function switchLevel(levelIndex) {
     currentLevelIndex = levelIndex;
     renderLevelGrid();
     updateCurrentLevel();
+    renderMissionList();
 }
 
 function updateCurrentLevel() {
@@ -219,6 +249,38 @@ function updateGridSize() {
     saveToLocalStorage();
 }
 
+// ===== Shape helpers =====
+function generateGuidSimple() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+/** Returns the absolute cell positions for the currently selected shape
+ *  anchored at (anchorRow, anchorCol). */
+function getShapeCells(anchorRow, anchorCol, shapeKey) {
+    const shape = SHAPES[shapeKey] || SHAPES.single;
+    return shape.cells.map(([dr, dc]) => ({ row: anchorRow + dr, col: anchorCol + dc }));
+}
+
+/** Check if all cells of a shape fit within the grid. */
+function shapeFitsInGrid(cells, gridWidth, gridHeight) {
+    return cells.every(c => c.row >= 0 && c.row < gridHeight && c.col >= 0 && c.col < gridWidth);
+}
+
+/** Check if all cells of a shape are free (or occupied by the same shapeId to allow overwrite). */
+function shapeCellsFree(cells, blocks, excludeShapeId = null) {
+    return cells.every(c => {
+        const existing = blocks.find(b => b.row === c.row && b.col === c.col);
+        if (!existing) return true;
+        if (excludeShapeId && existing.shapeId === excludeShapeId) return true;
+        return false;
+    });
+}
+
+// ===== Grid Rendering =====
 function renderGrid() {
     const world = gameData.worlds[currentWorldIndex];
     const level = world.levels[currentLevelIndex];
@@ -231,6 +293,53 @@ function renderGrid() {
     grid.style.gridTemplateColumns = `repeat(${level.gridWidth}, 50px)`;
     grid.style.gridTemplateRows = `repeat(${level.gridHeight}, 50px)`;
 
+    // Build a quick lookup map for shape adjacency
+    const blockMap = {};
+    level.blocks.forEach(b => {
+        blockMap[`${b.row},${b.col}`] = b;
+    });
+
+    // Greedy 3-coloring so adjacent shapes always have distinct tints.
+    // Build adjacency between shapes.
+    const shapeIds = [...new Set(level.blocks.filter(b => b.shapeId).map(b => b.shapeId))];
+    const adjSet = {};
+    shapeIds.forEach(id => { adjSet[id] = new Set(); });
+    level.blocks.forEach(b => {
+        if (!b.shapeId) return;
+        [
+            blockMap[`${b.row},${b.col+1}`],
+            blockMap[`${b.row},${b.col-1}`],
+            blockMap[`${b.row+1},${b.col}`],
+            blockMap[`${b.row-1},${b.col}`],
+        ].forEach(nb => {
+            if (nb && nb.shapeId && nb.shapeId !== b.shapeId)
+                adjSet[b.shapeId].add(nb.shapeId);
+        });
+    });
+    // Sort shapes by top-left position (row-major) so greedy order is stable.
+    const shapeTopLeft = {};
+    level.blocks.forEach(b => {
+        if (!b.shapeId) return;
+        const prev = shapeTopLeft[b.shapeId];
+        if (!prev || b.row < prev.row || (b.row === prev.row && b.col < prev.col))
+            shapeTopLeft[b.shapeId] = { row: b.row, col: b.col };
+    });
+    const sortedShapeIds = shapeIds.slice().sort((a, b) => {
+        const pa = shapeTopLeft[a] || {row:0,col:0};
+        const pb = shapeTopLeft[b] || {row:0,col:0};
+        return pa.row !== pb.row ? pa.row - pb.row : pa.col - pb.col;
+    });
+    // Greedy assign: pick lowest color (0,1,2) not used by any already-colored neighbour.
+    const shapeTintIndex = {};
+    sortedShapeIds.forEach(id => {
+        const usedColors = new Set([...adjSet[id]]
+            .filter(nid => shapeTintIndex[nid] !== undefined)
+            .map(nid => shapeTintIndex[nid]));
+        for (let c = 0; c <= 3; c++) {
+            if (!usedColors.has(c)) { shapeTintIndex[id] = c; break; }
+        }
+    });
+
     for (let row = 0; row < level.gridHeight; row++) {
         for (let col = 0; col < level.gridWidth; col++) {
             const cell = document.createElement('div');
@@ -238,13 +347,33 @@ function renderGrid() {
             cell.dataset.row = row;
             cell.dataset.col = col;
 
-            // Check if there's a block at this position
-            const block = level.blocks.find(b => b.row === row && b.col === col);
+            const block = blockMap[`${row},${col}`];
             if (block) {
                 cell.classList.add('has-block', `block-${block.blockType}`);
+                cell.dataset.shapeId = block.shapeId || '';
+
+                // Greedy 3-tint: 0=normal, 1=dim, 2=dimmer — adjacent shapes always differ.
+                const tint = block.shapeId ? shapeTintIndex[block.shapeId] : 0;
+                if (tint === 1) cell.classList.add('block-tint-alt');
+                if (tint === 2) cell.classList.add('block-tint-alt2');
+
+                // Add connection classes: suppress borders between adjacent same-shape cells
+                if (block.shapeId) {
+                    const right  = blockMap[`${row},${col+1}`];
+                    const left   = blockMap[`${row},${col-1}`];
+                    const bottom = blockMap[`${row+1},${col}`];
+                    const top    = blockMap[`${row-1},${col}`];
+
+                    if (right  && right.shapeId  === block.shapeId) cell.classList.add('conn-right');
+                    if (left   && left.shapeId   === block.shapeId) cell.classList.add('conn-left');
+                    if (bottom && bottom.shapeId === block.shapeId) cell.classList.add('conn-bottom');
+                    if (top    && top.shapeId    === block.shapeId) cell.classList.add('conn-top');
+                }
             }
 
-            cell.onclick = () => toggleBlock(row, col);
+            cell.addEventListener('click', () => toggleBlock(row, col));
+            cell.addEventListener('mouseenter', () => showShapePreview(row, col));
+            cell.addEventListener('mouseleave', clearShapePreview);
             grid.appendChild(cell);
         }
     }
@@ -252,31 +381,97 @@ function renderGrid() {
     container.appendChild(grid);
 }
 
+// ===== Hover Preview =====
+function showShapePreview(anchorRow, anchorCol) {
+    const world = gameData.worlds[currentWorldIndex];
+    const level = world.levels[currentLevelIndex];
+
+    clearShapePreview();
+
+    if (selectedBlockType === 'empty') return;
+
+    const cells = getShapeCells(anchorRow, anchorCol, selectedShape);
+
+    cells.forEach(c => {
+        const cell = document.querySelector(`.grid-cell[data-row="${c.row}"][data-col="${c.col}"]`);
+        if (cell) {
+            const fits = c.row >= 0 && c.row < level.gridHeight && c.col >= 0 && c.col < level.gridWidth;
+            if (fits) {
+                cell.classList.add('shape-preview', `preview-${selectedBlockType}`);
+            }
+        }
+    });
+}
+
+function clearShapePreview() {
+    document.querySelectorAll('.grid-cell.shape-preview').forEach(cell => {
+        cell.classList.remove('shape-preview',
+            'preview-normal', 'preview-explosive',
+            'preview-doubleDamage', 'preview-reinforced');
+    });
+}
+
+// ===== Block Placement =====
 function toggleBlock(row, col) {
     const world = gameData.worlds[currentWorldIndex];
     const level = world.levels[currentLevelIndex];
 
-    // Find existing block at this position
-    const blockIndex = level.blocks.findIndex(b => b.row === row && b.col === col);
+    clearShapePreview();
 
     if (selectedBlockType === 'empty') {
-        // Remove block if it exists
-        if (blockIndex !== -1) {
-            level.blocks.splice(blockIndex, 1);
+        // Erase: find the block and remove all cells of its shape
+        const block = level.blocks.find(b => b.row === row && b.col === col);
+        if (block) {
+            if (block.shapeId) {
+                // Remove all cells with same shapeId
+                level.blocks = level.blocks.filter(b => b.shapeId !== block.shapeId);
+            } else {
+                level.blocks = level.blocks.filter(b => !(b.row === row && b.col === col));
+            }
         }
     } else {
-        // Add or update block
-        if (blockIndex !== -1) {
-            // Update existing block type
-            level.blocks[blockIndex].blockType = selectedBlockType;
-        } else {
-            // Add new block
-            level.blocks.push({
-                row: row,
-                col: col,
-                blockType: selectedBlockType
-            });
+        // Clicking on an existing block: figure out what shapeId is there
+        const existingAtClick = level.blocks.find(b => b.row === row && b.col === col);
+        const existingShapeId = existingAtClick ? existingAtClick.shapeId : null;
+
+        // The new cells this placement would occupy
+        const cells = getShapeCells(row, col, selectedShape);
+
+        // Validation: must fit in grid
+        if (!shapeFitsInGrid(cells, level.gridWidth, level.gridHeight)) {
+            showNotification('⚠️ Shape doesn\'t fit here!', 'warning');
+            return;
         }
+
+        // Remove any existing shape that was at the clicked cell (replace behaviour)
+        if (existingShapeId) {
+            level.blocks = level.blocks.filter(b => b.shapeId !== existingShapeId);
+        }
+
+        // Check if remaining cells are free
+        if (!shapeCellsFree(cells, level.blocks)) {
+            showNotification('⚠️ Some cells are occupied!', 'warning');
+            // Restore removed shape
+            if (existingShapeId) {
+                // We already removed it – need to re-render to restore. Easiest: just re-render
+                renderGrid();
+                updatePreview();
+                return;
+            }
+            return;
+        }
+
+        // Place all cells with shared shapeId
+        const newShapeId = generateGuidSimple();
+        cells.forEach(c => {
+            level.blocks.push({
+                row: c.row,
+                col: c.col,
+                blockType: selectedBlockType,
+                shapeId: newShapeId,
+                shapeType: selectedShape
+            });
+        });
     }
 
     renderGrid();
@@ -312,12 +507,274 @@ function selectBlockType(type) {
     });
 }
 
+// ===== Shape Selector =====
+function selectShape(key) {
+    selectedShape = key;
+
+    document.querySelectorAll('.shape-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.shape === key);
+    });
+
+    // If switching away from custom, hide builder tab indicator
+    if (key !== '__custom__') {
+        document.querySelectorAll('.shape-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === 'presets');
+        });
+        document.getElementById('shapeTabPresets').style.display = '';
+        document.getElementById('shapeTabCustom').style.display = 'none';
+    }
+}
+
+function renderShapeSelector() {
+    const container = document.getElementById('shapeSelector');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // ---- Tab bar ----
+    const tabBar = document.createElement('div');
+    tabBar.className = 'shape-tab-bar';
+
+    const tabPresetBtn = document.createElement('button');
+    tabPresetBtn.className = 'shape-tab-btn active';
+    tabPresetBtn.dataset.tab = 'presets';
+    tabPresetBtn.textContent = 'Presets';
+
+    const tabCustomBtn = document.createElement('button');
+    tabCustomBtn.className = 'shape-tab-btn';
+    tabCustomBtn.dataset.tab = 'custom';
+    tabCustomBtn.textContent = '✏️ Draw';
+
+    tabBar.appendChild(tabPresetBtn);
+    tabBar.appendChild(tabCustomBtn);
+    container.appendChild(tabBar);
+
+    // ---- Presets tab ----
+    const presetsPanel = document.createElement('div');
+    presetsPanel.id = 'shapeTabPresets';
+    presetsPanel.className = 'shape-presets-grid';
+
+    Object.entries(SHAPES).forEach(([key, shape]) => {
+        if (key === '__custom__') return; // skip — shown in draw tab
+
+        const item = document.createElement('div');
+        item.className = 'shape-item' + (key === selectedShape ? ' active' : '');
+        item.dataset.shape = key;
+        item.title = shape.name;
+        item.onclick = () => selectShape(key);
+
+        const miniGrid = document.createElement('div');
+        miniGrid.className = 'shape-mini-grid';
+        miniGrid.style.gridTemplateColumns = `repeat(${shape.cols}, 1fr)`;
+        miniGrid.style.gridTemplateRows = `repeat(${shape.rows}, 1fr)`;
+
+        const filledSet = new Set(shape.cells.map(([r, c]) => `${r},${c}`));
+        for (let r = 0; r < shape.rows; r++) {
+            for (let c = 0; c < shape.cols; c++) {
+                const miniCell = document.createElement('div');
+                miniCell.className = filledSet.has(`${r},${c}`) ? 'shape-mini-cell filled' : 'shape-mini-cell empty';
+                miniGrid.appendChild(miniCell);
+            }
+        }
+
+        const label = document.createElement('span');
+        label.textContent = shape.name;
+
+        item.appendChild(miniGrid);
+        item.appendChild(label);
+        presetsPanel.appendChild(item);
+    });
+    container.appendChild(presetsPanel);
+
+    // ---- Custom / Draw tab ----
+    const customPanel = document.createElement('div');
+    customPanel.id = 'shapeTabCustom';
+    customPanel.className = 'shape-custom-panel';
+    customPanel.style.display = 'none';
+    container.appendChild(customPanel);
+
+    renderCustomBuilder(customPanel);
+
+    // ---- Tab switching logic ----
+    tabPresetBtn.onclick = () => {
+        tabPresetBtn.classList.add('active');
+        tabCustomBtn.classList.remove('active');
+        presetsPanel.style.display = '';
+        customPanel.style.display = 'none';
+    };
+    tabCustomBtn.onclick = () => {
+        tabCustomBtn.classList.add('active');
+        tabPresetBtn.classList.remove('active');
+        presetsPanel.style.display = 'none';
+        customPanel.style.display = '';
+    };
+
+    // If custom is already selected, show draw tab
+    if (selectedShape === '__custom__') {
+        tabCustomBtn.click();
+    }
+}
+
+// ===== Custom Shape Builder =====
+function renderCustomBuilder(panel) {
+    // Size controls
+    const sizeRow = document.createElement('div');
+    sizeRow.className = 'custom-size-row';
+    sizeRow.innerHTML = `
+        <label>Cols <input id="custCols" type="number" min="1" max="6" value="${customBuilderCols}"></label>
+        <label>Rows <input id="custRows" type="number" min="1" max="6" value="${customBuilderRows}"></label>
+        <button class="btn btn-secondary btn-sm" id="custClearBtn">🗑 Clear</button>
+    `;
+    panel.appendChild(sizeRow);
+
+    // Canvas
+    const canvas = document.createElement('div');
+    canvas.className = 'custom-builder-canvas';
+    canvas.id = 'customBuilderCanvas';
+    panel.appendChild(canvas);
+
+    // Use button
+    const useBtn = document.createElement('button');
+    useBtn.className = 'btn btn-primary btn-sm';
+    useBtn.textContent = '✅ Use this shape';
+    useBtn.style.marginTop = '0.5rem';
+    useBtn.onclick = applyCustomShape;
+    panel.appendChild(useBtn);
+
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Click cells to draw, then press Use.';
+    panel.appendChild(hint);
+
+    // Wire size inputs
+    panel.querySelector('#custCols').addEventListener('change', e => {
+        customBuilderCols = Math.max(1, Math.min(6, parseInt(e.target.value) || 1));
+        e.target.value = customBuilderCols;
+        // Prune cells outside new size
+        customBuilderCells = new Set([...customBuilderCells].filter(k => {
+            const [r, c] = k.split(',').map(Number);
+            return r < customBuilderRows && c < customBuilderCols;
+        }));
+        refreshCustomCanvas();
+    });
+    panel.querySelector('#custRows').addEventListener('change', e => {
+        customBuilderRows = Math.max(1, Math.min(6, parseInt(e.target.value) || 1));
+        e.target.value = customBuilderRows;
+        customBuilderCells = new Set([...customBuilderCells].filter(k => {
+            const [r, c] = k.split(',').map(Number);
+            return r < customBuilderRows && c < customBuilderCols;
+        }));
+        refreshCustomCanvas();
+    });
+    panel.querySelector('#custClearBtn').addEventListener('click', () => {
+        customBuilderCells.clear();
+        refreshCustomCanvas();
+    });
+
+    refreshCustomCanvas();
+}
+
+function refreshCustomCanvas() {
+    const canvas = document.getElementById('customBuilderCanvas');
+    if (!canvas) return;
+    canvas.innerHTML = '';
+    canvas.style.gridTemplateColumns = `repeat(${customBuilderCols}, 1fr)`;
+    canvas.style.gridTemplateRows = `repeat(${customBuilderRows}, 1fr)`;
+
+    for (let r = 0; r < customBuilderRows; r++) {
+        for (let c = 0; c < customBuilderCols; c++) {
+            const cell = document.createElement('div');
+            const key = `${r},${c}`;
+            cell.className = 'custom-builder-cell' + (customBuilderCells.has(key) ? ' filled' : '');
+            cell.addEventListener('click', () => {
+                if (customBuilderCells.has(key)) {
+                    customBuilderCells.delete(key);
+                } else {
+                    customBuilderCells.add(key);
+                }
+                refreshCustomCanvas();
+            });
+            canvas.appendChild(cell);
+        }
+    }
+}
+
+function applyCustomShape() {
+    if (customBuilderCells.size === 0) {
+        showNotification('⚠️ Draw at least one cell!', 'warning');
+        return;
+    }
+
+    // Normalise: shift so min row = 0, min col = 0
+    const parsed = [...customBuilderCells].map(k => k.split(',').map(Number));
+    const minR = Math.min(...parsed.map(([r]) => r));
+    const minC = Math.min(...parsed.map(([, c]) => c));
+    const normalised = parsed.map(([r, c]) => [r - minR, c - minC]);
+
+    const maxR = Math.max(...normalised.map(([r]) => r));
+    const maxC = Math.max(...normalised.map(([, c]) => c));
+
+    SHAPES['__custom__'] = {
+        name: 'Custom',
+        cells: normalised,
+        rows: maxR + 1,
+        cols: maxC + 1,
+    };
+
+    selectedShape = '__custom__';
+    showNotification('✅ Custom shape applied!', 'success');
+}
+
+// ===== Export Transform =====
+/**
+ * Converts a level's flat cell-block array into grouped pieces.
+ * Each piece = one shape (same shapeId) with its full list of cells.
+ * Single-cell blocks without a shapeId are each their own piece.
+ * Returns a plain object safe to JSON-stringify.
+ */
+function buildExportLevel(level) {
+    const pieceMap = {}; // shapeId -> piece object
+
+    level.blocks.forEach(b => {
+        const key = b.shapeId || `__solo__${b.row}_${b.col}`;
+        if (!pieceMap[key]) {
+            pieceMap[key] = {
+                id: b.shapeId || key,
+                blockType: b.blockType,
+                shapeType: b.shapeType || 'single',
+                cells: []
+            };
+        }
+        pieceMap[key].cells.push({ row: b.row, col: b.col });
+    });
+
+    return {
+        levelId:    level.levelId,
+        isBossLevel: level.isBossLevel,
+        gridWidth:  level.gridWidth,
+        gridHeight: level.gridHeight,
+        blocks: Object.values(pieceMap),
+        missionItems: level.missionItems || []
+    };
+}
+
+function buildExportWorld(world) {
+    return {
+        worldId:   world.worldId,
+        worldName: world.worldName,
+        levels: world.levels.map(buildExportLevel)
+    };
+}
+
+function buildExportAll() {
+    return { worlds: gameData.worlds.map(buildExportWorld) };
+}
+
 // ===== JSON Preview & Export =====
 function updatePreview() {
     const preview = document.getElementById('jsonContent');
     const currentWorld = gameData.worlds[currentWorldIndex];
     const currentLevel = currentWorld.levels[currentLevelIndex];
-    preview.textContent = JSON.stringify(currentLevel, null, 2);
+    preview.textContent = JSON.stringify(buildExportLevel(currentLevel), null, 2);
 }
 
 function exportJSON() {
@@ -331,28 +788,25 @@ function exportJSON() {
 
     switch (exportScope) {
         case 'level':
-            // Export only the current level
-            dataToExport = currentLevel;
+            dataToExport = buildExportLevel(currentLevel);
             filename = `level_w${currentWorld.worldId}_l${currentLevel.levelId}.json`;
             successMessage = `✅ Level ${currentLevel.levelId} exported successfully!`;
             break;
 
         case 'world':
-            // Export the entire current world (all levels)
-            dataToExport = currentWorld;
+            dataToExport = buildExportWorld(currentWorld);
             filename = `world_${currentWorld.worldId}_${currentWorld.worldName.replace(/\s+/g, '_')}.json`;
             successMessage = `✅ World "${currentWorld.worldName}" exported successfully!`;
             break;
 
         case 'all':
-            // Export all worlds
-            dataToExport = gameData;
+            dataToExport = buildExportAll();
             filename = `blockmerge_all_worlds.json`;
             successMessage = `✅ All worlds exported successfully!`;
             break;
 
         default:
-            dataToExport = currentLevel;
+            dataToExport = buildExportLevel(currentLevel);
             filename = `level_w${currentWorld.worldId}_l${currentLevel.levelId}.json`;
             successMessage = `✅ Level ${currentLevel.levelId} exported successfully!`;
     }
@@ -496,3 +950,136 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// ===== Mission Management =====
+function generateGuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+function renderMissionList() {
+    const world = gameData.worlds[currentWorldIndex];
+    const level = world.levels[currentLevelIndex];
+    const container = document.getElementById('missionList');
+
+    if (!level.missionItems) {
+        level.missionItems = [];
+    }
+
+    if (level.missionItems.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; text-align: center;">No missions yet. Click "Add Mission" to create one.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+
+    level.missionItems.forEach((mission, index) => {
+        const missionDiv = document.createElement('div');
+        missionDiv.className = 'mission-item';
+
+        missionDiv.innerHTML = `
+            <div class="mission-header">
+                <span class="mission-type-badge ${mission.type.toLowerCase()}">${mission.type}</span>
+                <button class="mission-delete-btn" onclick="deleteMission(${index})" title="Delete Mission">🗑️</button>
+            </div>
+            <div class="mission-fields">
+                <div>
+                    <div class="mission-field-label">Mission Type</div>
+                    <select onchange="updateMission(${index}, 'type', this.value)">
+                        <option value="Hit" ${mission.type === 'Hit' ? 'selected' : ''}>Hit</option>
+                        <option value="Destroy" ${mission.type === 'Destroy' ? 'selected' : ''}>Destroy</option>
+                        <option value="Combo" ${mission.type === 'Combo' ? 'selected' : ''}>Combo</option>
+                    </select>
+                </div>
+                <div>
+                    <div class="mission-field-label">Name</div>
+                    <input type="text" value="${mission.name || ''}" 
+                           onchange="updateMission(${index}, 'name', this.value)"
+                           placeholder="Mission name">
+                </div>
+                <div>
+                    <div class="mission-field-label">Description</div>
+                    <textarea onchange="updateMission(${index}, 'description', this.value)"
+                              placeholder="Mission description">${mission.description || ''}</textarea>
+                </div>
+                <div class="mission-field-row">
+                    <div>
+                        <div class="mission-field-label">Min Value</div>
+                        <input type="number" value="${mission.minValue || 1}" min="1"
+                               onchange="updateMission(${index}, 'minValue', parseInt(this.value))">
+                    </div>
+                    <div>
+                        <div class="mission-field-label">Max Value</div>
+                        <input type="number" value="${mission.maxValue || 10}" min="1"
+                               onchange="updateMission(${index}, 'maxValue', parseInt(this.value))">
+                    </div>
+                </div>
+                <div>
+                    <div class="mission-field-label">Level Factor (multiplier per level)</div>
+                    <input type="number" value="${mission.multLevelFactor || 1}" step="0.1" min="0"
+                           onchange="updateMission(${index}, 'multLevelFactor', parseFloat(this.value))">
+                </div>
+            </div>
+        `;
+
+        container.appendChild(missionDiv);
+    });
+}
+
+function addMission() {
+    const world = gameData.worlds[currentWorldIndex];
+    const level = world.levels[currentLevelIndex];
+
+    if (!level.missionItems) {
+        level.missionItems = [];
+    }
+
+    const newMission = {
+        guid: generateGuid(),
+        type: 'Hit',
+        name: 'New Mission',
+        description: 'Complete this mission',
+        minValue: 5,
+        maxValue: 10,
+        multLevelFactor: 1.0
+    };
+
+    level.missionItems.push(newMission);
+    renderMissionList();
+    updatePreview();
+    saveToLocalStorage();
+    showNotification('✅ Mission added!', 'success');
+}
+
+function deleteMission(index) {
+    if (!confirm('Are you sure you want to delete this mission?')) {
+        return;
+    }
+
+    const world = gameData.worlds[currentWorldIndex];
+    const level = world.levels[currentLevelIndex];
+
+    level.missionItems.splice(index, 1);
+    renderMissionList();
+    updatePreview();
+    saveToLocalStorage();
+    showNotification('🗑️ Mission deleted', 'info');
+}
+
+function updateMission(index, field, value) {
+    const world = gameData.worlds[currentWorldIndex];
+    const level = world.levels[currentLevelIndex];
+
+    level.missionItems[index][field] = value;
+
+    // Re-render to update the badge if type changed
+    if (field === 'type') {
+        renderMissionList();
+    }
+
+    updatePreview();
+    saveToLocalStorage();
+}
